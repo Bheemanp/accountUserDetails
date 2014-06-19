@@ -1,27 +1,36 @@
 package user.account.info;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import com.google.android.gms.auth.GoogleAuthUtil;
+
+import user.account.adapter.ListUserAccounts;
+import user.account.classes.AccountDetails;
 import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.accounts.AccountManagerCallback;
 import android.accounts.AccountManagerFuture;
 import android.accounts.AuthenticatorDescription;
 import android.app.Activity;
-import android.app.ActionBar;
-import android.app.AlertDialog;
-import android.app.Dialog;
-import android.app.Fragment;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Adapter;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.ImageView;
@@ -29,18 +38,16 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.AdapterView.OnItemClickListener;
-import android.os.Build;
 
 public class MainActivity extends Activity implements OnItemClickListener {
 	private AccountManager mAccountManager;
 	private ListView lv;
 	private Account[] accounts;
-	private static final String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
-
+	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		setContentView(R.layout.list_item);
+		setContentView(R.layout.activity_main);
 		lv = (ListView) findViewById(R.id.lst_view);
 		mAccountManager = AccountManager.get(getApplicationContext());
 		accounts = mAccountManager.getAccounts();
@@ -50,107 +57,104 @@ public class MainActivity extends Activity implements OnItemClickListener {
 		lv.setOnItemClickListener(this);
 	}
 
-	class ListUserAccounts extends BaseAdapter {
-		Account[] account;
-		Context context;
-		AccountManager mAccountManager;
-
-		public ListUserAccounts(Context context, Account[] account,
-				AccountManager mAccountManager) {
-			this.account = account;
-			this.mAccountManager = mAccountManager;
-			this.context = context;
-		}
-
-		@Override
-		public int getCount() {
-			// TODO Auto-generated method stub
-			return account.length;
-		}
-
-		@Override
-		public Object getItem(int position) {
-			// TODO Auto-generated method stub
-			return position;
-		}
-
-		@Override
-		public long getItemId(int position) {
-			// TODO Auto-generated method stub
-			return position;
-		}
-
-		@Override
-		public View getView(int position, View convertView, ViewGroup parent) {
-			// TODO Auto-generated method stub
-
-			LayoutInflater inflator = getLayoutInflater();
-
-			convertView = inflator.inflate(R.layout.fragment_main, parent,
-					false);
-			TextView label = (TextView) convertView.findViewById(R.id.label);
-			ImageView imgView = (ImageView) convertView
-					.findViewById(R.id.imageView);
-
-			label.setText(account[position].name);
-			imgView.setImageDrawable(getIconForAccount(account[position],
-					mAccountManager, context));
-
-			return convertView;
-		}
-
-	}
-
-	private Drawable getIconForAccount(Account account, AccountManager manager,
-			Context context) {
-		AuthenticatorDescription[] descriptions = manager
-				.getAuthenticatorTypes();
-		for (AuthenticatorDescription description : descriptions) {
-			if (description.type.equals(account.type)) {
-				PackageManager pm = context.getPackageManager();
-				return pm.getDrawable(description.packageName,
-						description.iconId, null);
-			}
-		}
-		return null;
-	}
-
 	@Override
 	public void onItemClick(AdapterView<?> parent, View view, final int position,
 			long id) {
-		
-		Toast.makeText(MainActivity.this, accounts[position].name+ "", 10000).show();
-		mAccountManager.getAuthToken(accounts[position], "android", null, MainActivity.this, new AccountManagerCallback<Bundle>(){
-			@Override
-			public void run(AccountManagerFuture<Bundle> future) {
-				// TODO Auto-generated method stub
-				try{
-					String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
-					Toast.makeText(MainActivity.this, token, 10000).show();
-					Log.v("token", token);
-					
-					processToken(token);
-					
-				}catch(Exception e){
-					Toast.makeText(MainActivity.this, "exception", 10000).show();
-					e.printStackTrace();
+		if (checkConnectivity()) {
+			mAccountManager.getAuthToken(accounts[position], "android", null, MainActivity.this, new AccountManagerCallback<Bundle>(){
+				@Override
+				public void run(AccountManagerFuture<Bundle> future) {
+					// TODO Auto-generated method stub
+					try{
+						String token = future.getResult().getString(AccountManager.KEY_AUTHTOKEN);
+						AccountDetails accDetails = new AccountDetails(token,accounts[position].name);
+						new FetchUserInfo().execute(accDetails);
+					} catch(Exception e) {
+						e.printStackTrace();
+						Toast.makeText(MainActivity.this, e.getMessage(), 10000).show();
+					}
 				}
-			}
-			
-		},null);
-		/*mAccountManager.getAuthToken(accounts[position], "android", null, MainActivity.this,new AccountManagerCallback<Bundle>(){
-
-			@Override
-			public void run(AccountManagerFuture<Bundle> future) {
-				// TODO Auto-generated method stub
-				
-			}
-			
-		});*/
+			},null);
+		} else {
+			Toast.makeText(MainActivity.this, "Please Check Internet Connectivity", 10000).show();
+		}
 	}
 	
-	private void processToken(String token){
-		
+	private boolean checkConnectivity(){
+		ConnectivityManager cm = (ConnectivityManager) MainActivity.this
+				.getSystemService(Context.CONNECTIVITY_SERVICE);
+		NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+		if (networkInfo != null && networkInfo.isConnected()) {
+			return true;
+		}
+		return false;
 	}
+	
+	class FetchUserInfo extends AsyncTask<AccountDetails, Void, Void> {
+		private String SCOPE = "oauth2:https://www.googleapis.com/auth/userinfo.profile";
+		
+		@Override
+		protected void onPreExecute() {
+			// TODO Auto-generated method stub
+			super.onPreExecute();
+		}
+		@Override
+		protected Void doInBackground(AccountDetails... params) {
+			// TODO Auto-generated method stub
+			try{
+				for(int i = 0 ; i < params.length ; i++){
+					fetchUserDataFromServer(params[i].getToken(),params[i].getEmailId());
+				}
+			}catch(IOException ioe){
+				ioe.printStackTrace();
+			}catch (JSONException jse) {
+				jse.printStackTrace();
+			}catch (Exception e) {
+				e.printStackTrace();
+			}
+			
+			return null;
+		}
 
+		private void fetchUserDataFromServer(String token,String email) throws IOException, JSONException {
+			// TODO Auto-generated method stub
+			try {
+				URL url = new URL("https://www.googleapis.com/oauth2/v1/userinfo?access_token="+ token);
+				HttpURLConnection con = (HttpURLConnection) url.openConnection();
+				int sc = con.getResponseCode();
+				Log.v("Fetch", sc+"");
+				if (sc == 200) {
+					InputStream is = con.getInputStream();
+					String GOOGLE_USER_DATA = readResponse(is);
+					Log.v("user data", GOOGLE_USER_DATA);
+					is.close();
+					
+					JSONObject profileInfo = new JSONObject(GOOGLE_USER_DATA);
+					Intent intent=new Intent(MainActivity.this,ShowUserInfo.class);
+					intent.putExtra("name", profileInfo.getString("name"));
+					intent.putExtra("gender", profileInfo.getString("gender"));
+					intent.putExtra("birthday", profileInfo.getString("birthday"));
+					intent.putExtra("imageurl", profileInfo.getString("userImageUrl"));
+					startActivity(intent);
+					finish();
+					return;
+				} else if (sc == 401) {
+					GoogleAuthUtil.invalidateToken(MainActivity.this,token);
+					return;
+				}
+			} catch(Exception e) {
+				
+			}
+		}
+		
+		private String readResponse(InputStream is) throws IOException {
+			ByteArrayOutputStream bos = new ByteArrayOutputStream();
+			byte[] data = new byte[2048];
+			int len = 0;
+			while ((len = is.read(data, 0, data.length)) >= 0) {
+				bos.write(data, 0, len);
+			}
+			return new String(bos.toByteArray(), "UTF-8");
+		}
+	}
 }
